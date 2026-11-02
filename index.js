@@ -243,6 +243,74 @@ app.get("/my-books", async (req, res) => {
     res.status(500).send({ message: "Failed to fetch books" });
   }
 });
+// Update a book (only the owner can update)
+app.put("/my-books/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, author, category, image, description, email } = req.body;
+
+    if (!ObjectId.isValid(id) || !email) {
+      return res
+        .status(400)
+        .send({ success: false, message: "Valid id and email are required" });
+    }
+
+    const result = await myAddedBookCollection.updateOne(
+      { _id: new ObjectId(id), userEmail: email },
+      {
+        $set: {
+          title,
+          author,
+          category,
+          image,
+          description: description || "",
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    if (result.matchedCount === 0) {
+      return res
+        .status(404)
+        .send({ success: false, message: "Book not found" });
+    }
+
+    res.send({ success: true, message: "Book updated successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ success: false, message: "Failed to update book" });
+  }
+});
+
+// Delete a book (only the owner can delete): DELETE /my-books/:id?email=...
+app.delete("/my-books/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { email } = req.query;
+
+    if (!ObjectId.isValid(id) || !email) {
+      return res
+        .status(400)
+        .send({ success: false, message: "Valid id and email are required" });
+    }
+
+    const result = await myAddedBookCollection.deleteOne({
+      _id: new ObjectId(id),
+      userEmail: email,
+    });
+
+    if (result.deletedCount === 0) {
+      return res
+        .status(404)
+        .send({ success: false, message: "Book not found" });
+    }
+
+    res.send({ success: true, message: "Book deleted successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ success: false, message: "Failed to delete book" });
+  }
+});
 
 app.listen(port, () => {
   console.log(`Book nook server is running on port: ${port}`);
