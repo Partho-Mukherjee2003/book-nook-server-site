@@ -27,6 +27,7 @@ export async function connectToMongoDB() {
 const mongoClient = await connectToMongoDB();
 const db = mongoClient.db("BooksForBooknook");
 const booksCollection = db.collection("latestBooks");
+const borrowedBooksCollection = db.collection("borrowedBooks");
 
 app.get("/", (req, res) => {
   res.send("Book nook server is running");
@@ -88,6 +89,30 @@ app.get("/allbooks/:id", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).send({ message: "Failed to fetch book" });
+  }
+});
+
+app.post("/borrowed", async (req, res) => {
+  try {
+    const borrowData = req.body;
+    const { bookId } = borrowData;
+
+    const book = await booksCollection.findOne({ _id: new ObjectId(bookId) });
+    if (!book) {
+      return res.status(400).send({ message: "Book not found" });
+    }
+
+    borrowData.borrowedAt = new Date();
+    const result = await borrowedBooksCollection.insertOne(borrowData);
+
+    res.send({
+      success: true,
+      message: "Book borrowed successfully",
+      insertedId: result.insertedId,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ success: false, message: "Failed to borrow book" });
   }
 });
 
