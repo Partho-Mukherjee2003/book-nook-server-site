@@ -28,6 +28,8 @@ const mongoClient = await connectToMongoDB();
 const db = mongoClient.db("BooksForBooknook");
 const booksCollection = db.collection("latestBooks");
 const borrowsCollection = db.collection("borrows"); // new collection
+const myAddedBookCollection = db.collection("myAddedBook");
+
 
 app.get("/", (req, res) => {
   res.send("Book nook server is running");
@@ -165,27 +167,82 @@ app.post("/borrows", async (req, res) => {
 
 // Get a user's borrowed books (useful for a "My Borrows" page)
 // Example: GET /borrows?email=user@example.com
-app.get("/borrows", async (req, res) => {
+app.get('/borrows', async (req, res) => {
   try {
     const { email } = req.query;
     if (!email) {
-      return res.status(400).send({ message: "email query is required" });
+      return res.status(400).send({ message: 'email query is required' });
     }
 
-    const borrows = await borrowsCollection
+    const borrowsBook = await borrowsCollection
       .find({ userEmail: email })
       .sort({ borrowDate: -1 })
       .toArray();
 
-    res.send(borrows);
+    res.send(borrowsBook);
   } catch (error) {
     console.error(error);
     res.status(500).send({ message: "Failed to fetch borrows" });
   }
 });
 
+//                         ***My Added Books routes***
 
+// Add a book
+app.post("/my-books", async (req, res) => {
+  try {
+    const { title, author, category, image, description, userName, userEmail } =
+      req.body;
 
+    if (!title || !author || !category || !image || !userEmail) {
+      return res
+        .status(400)
+        .send({ success: false, message: "Missing required fields" });
+    }
+
+    const newBook = {
+      title,
+      author,
+      category,
+      image,
+      description: description || "",
+      userName,
+      userEmail,
+      addedAt: new Date(),
+    };
+
+    const result = await myAddedBookCollection.insertOne(newBook);
+
+    res.status(201).send({
+      success: true,
+      message: "Book added successfully",
+      insertedId: result.insertedId,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ success: false, message: "Failed to add book" });
+  }
+});
+
+// Get only one user's books: GET /my-books?email=user@example.com
+app.get("/my-books", async (req, res) => {
+  try {
+    const { email } = req.query;
+    if (!email) {
+      return res.status(400).send({ message: "email query is required" });
+    }
+
+    const books = await myAddedBookCollection
+      .find({ userEmail: email })
+      .sort({ addedAt: -1 })
+      .toArray();
+
+    res.send(books);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: "Failed to fetch books" });
+  }
+});
 
 app.listen(port, () => {
   console.log(`Book nook server is running on port: ${port}`);
