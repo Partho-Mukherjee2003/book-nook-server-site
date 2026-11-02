@@ -1,12 +1,12 @@
 import express from "express";
-import { MongoClient,ObjectId } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 import "dotenv/config";
 import cors from "cors";
 
 const app = express();
 const port = process.env.PORT || 5000;
 
-//middleware
+// middleware
 app.use(cors());
 app.use(express.json());
 
@@ -27,7 +27,7 @@ export async function connectToMongoDB() {
 const mongoClient = await connectToMongoDB();
 const db = mongoClient.db("BooksForBooknook");
 const booksCollection = db.collection("latestBooks");
-const borrowedBooksCollection = db.collection("borrowedBooks");
+const borrowsCollection = db.collection("borrows"); // new collection
 
 app.get("/", (req, res) => {
   res.send("Book nook server is running");
@@ -46,6 +46,7 @@ app.get("/latestBooks", async (req, res) => {
     res.status(500).send({ message: "Failed to fetch books" });
   }
 });
+
 app.get("/allbooks", async (req, res) => {
   try {
     const books = await booksCollection.find().toArray();
@@ -55,6 +56,7 @@ app.get("/allbooks", async (req, res) => {
     res.status(500).send({ message: "Failed to fetch books" });
   }
 });
+
 app.post("/allbooks", async (req, res) => {
   try {
     const newBook = req.body;
@@ -92,20 +94,65 @@ app.get("/allbooks/:id", async (req, res) => {
   }
 });
 
-app.post("/borrowed", async (req, res) => {
-  try {
-    const borrowData = req.body;
-    const { bookId } = borrowData;
+//                         ***Borrow routes***
 
-    const book = await booksCollection.findOne({ _id: new ObjectId(bookId) });
-    if (!book) {
-      return res.status(400).send({ message: "Book not found" });
+// Create a borrow record
+app.post("/borrows", async (req, res) => {
+  try {
+    const { bookId, userName, userEmail } = req.body;
+
+    // 1. Validate input
+    if (!bookId || !userEmail) {
+      return res
+        .status(400)
+        .send({ success: false, message: "bookId and userEmail are required" });
+    }
+    if (!ObjectId.isValid(bookId)) {
+      return res
+        .status(400)
+        .send({ success: false, message: "Invalid book id" });
     }
 
-    borrowData.borrowedAt = new Date();
-    const result = await borrowedBooksCollection.insertOne(borrowData);
+    // 2. Make sure the book exists
+    const book = await booksCollection.findOne({ _id: new ObjectId(bookId) });
+    if (!book) {
+      return res
+        .status(404)
+        .send({ success: false, message: "Book not found" });
+    }
 
-    res.send({
+    // 3. Prevent borrowing the same book twice (until it's returned)
+    const alreadyBorrowed = await borrowsCollection.findOne({
+      bookId,
+      userEmail,
+      status: "borrowed",
+    });
+    if (alreadyBorrowed) {
+      return res.status(409).send({
+        success: false,
+        message: "You have already borrowed this book",
+      });
+    }
+
+    // 4. Build the record (dates are set on the server, 14-day loan)
+    const borrowDate = new Date();
+    const returnDate = new Date();
+    returnDate.setDate(borrowDate.getDate() + 14);
+
+    const borrow = {
+      bookId, // stored as string, same as the frontend sends
+      bookTitle: book.title, // taken from the DB, not trusted from the client
+      bookImage: book.image,
+      userName,
+      userEmail,
+      borrowDate,
+      returnDate,
+      status: "borrowed",
+    };
+
+    const result = await borrowsCollection.insertOne(borrow);
+
+    res.status(201).send({
       success: true,
       message: "Book borrowed successfully",
       insertedId: result.insertedId,
@@ -115,6 +162,30 @@ app.post("/borrowed", async (req, res) => {
     res.status(500).send({ success: false, message: "Failed to borrow book" });
   }
 });
+
+// Get a user's borrowed books (useful for a "My Borrows" page)
+// Example: GET /borrows?email=user@example.com
+app.get("/borrows", async (req, res) => {
+  try {
+    const { email } = req.query;
+    if (!email) {
+      return res.status(400).send({ message: "email query is required" });
+    }
+
+    const borrows = await borrowsCollection
+      .find({ userEmail: email })
+      .sort({ borrowDate: -1 })
+      .toArray();
+
+    res.send(borrows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: "Failed to fetch borrows" });
+  }
+});
+
+
+
 
 app.listen(port, () => {
   console.log(`Book nook server is running on port: ${port}`);
