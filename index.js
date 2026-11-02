@@ -10,7 +10,6 @@ const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-
 //                         ***MongoDB connection***
 const client = new MongoClient(
   `mongodb://${process.env.MONGODB_USERNAME}:${process.env.MONGODB_PASSWORD}@ac-2soslzi-shard-00-00.w0rm344.mongodb.net:27017,ac-2soslzi-shard-00-01.w0rm344.mongodb.net:27017,ac-2soslzi-shard-00-02.w0rm344.mongodb.net:27017/?ssl=true&replicaSet=atlas-13wds7-shard-0&authSource=admin`,
@@ -26,48 +25,53 @@ export async function connectToMongoDB() {
   }
 }
 const mongoClient = await connectToMongoDB();
-const db = mongoClient.db('BooksForBooknook');
-const booksCollection = db.collection('latestBooks');
+const db = mongoClient.db("BooksForBooknook");
+const booksCollection = db.collection("latestBooks");
 
-app.get('/', (req,res)=>{
-  res.send('Book nook server is running')
-})
+app.get("/", (req, res) => {
+  res.send("Book nook server is running");
+});
 
-app.get('/latestBooks', async(req,res)=>{
+app.get("/latestBooks", async (req, res) => {
   try {
-    const books = await
-    booksCollection
-    .find()
-    .sort({ _id: -1 })
-    .limit(6)
-    .toArray();
+    const books = await booksCollection
+      .find()
+      .sort({ _id: -1 })
+      .limit(6)
+      .toArray();
     res.send(books);
   } catch (error) {
     console.error(error);
     res.status(500).send({ message: "Failed to fetch books" });
   }
-})
-app.get('/allbooks', async(req,res)=>{
+});
+app.get("/allbooks", async (req, res) => {
   try {
-    const books = await
-    booksCollection
-    .find()
-    .toArray();
+    const books = await booksCollection.find().toArray();
     res.send(books);
   } catch (error) {
     console.error(error);
     res.status(500).send({ message: "Failed to fetch books" });
   }
-})
+});
+app.post("/allbooks", async (req, res) => {
+  try {
+    const newBook = req.body;
+    const result = await booksCollection.insertOne(newBook);
 
-
-
-
-
+    res.send({
+      success: true,
+      message: "Book added successfully",
+      insertedId: result.insertedId,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ success: false, message: "Failed to add book" });
+  }
+});
 
 app.listen(port, () => {
   console.log(`Book nook server is running on port: ${port}`);
-})
-
+});
 
 //http://localhost:5000
