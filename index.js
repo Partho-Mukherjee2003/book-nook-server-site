@@ -1,9 +1,15 @@
 import express from "express";
 import { MongoClient } from "mongodb";
 import "dotenv/config";
+import cors from "cors";
 
 const app = express();
 const port = process.env.PORT || 5000;
+
+//middleware
+app.use(cors());
+app.use(express.json());
+
 
 //                         ***MongoDB connection***
 const client = new MongoClient(
@@ -19,10 +25,39 @@ export async function connectToMongoDB() {
     console.dir(err);
   }
 }
-await connectToMongoDB();
+const mongoClient = await connectToMongoDB();
+const db = mongoClient.db('BooksForBooknook');
+const booksCollection = db.collection('latestBooks');
 
 app.get('/', (req,res)=>{
   res.send('Book nook server is running')
+})
+
+app.get('/latestBooks', async(req,res)=>{
+  try {
+    const books = await
+    booksCollection
+    .find()
+    .sort({ _id: -1 })
+    .limit(6)
+    .toArray();
+    res.send(books);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: "Failed to fetch books" });
+  }
+})
+app.get('/allbooks', async(req,res)=>{
+  try {
+    const books = await
+    booksCollection
+    .find()
+    .toArray();
+    res.send(books);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: "Failed to fetch books" });
+  }
 })
 
 
