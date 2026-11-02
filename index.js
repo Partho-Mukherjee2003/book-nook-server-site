@@ -1,5 +1,5 @@
 import express from "express";
-import { MongoClient } from "mongodb";
+import { MongoClient,ObjectId } from "mongodb";
 import "dotenv/config";
 import cors from "cors";
 
@@ -67,6 +67,27 @@ app.post("/allbooks", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).send({ success: false, message: "Failed to add book" });
+  }
+});
+
+app.get("/allbooks/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({ message: "Invalid book id" });
+    }
+
+    const book = await booksCollection.findOne({ _id: new ObjectId(id) });
+
+    if (!book) {
+      return res.status(404).send({ message: "Book not found" });
+    }
+
+    res.send(book);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: "Failed to fetch book" });
   }
 });
 
