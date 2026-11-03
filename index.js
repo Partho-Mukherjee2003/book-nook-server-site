@@ -4,14 +4,15 @@ import "dotenv/config";
 import cors from "cors";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
-
 const app = express();
 const port = process.env.PORT || 5000;
 
 // middleware
 app.use(cors());
 app.use(express.json());
-//middleware function
+
+//                         ***JWT verify middleware***
+// CLIENT_URL = deploy kora Next.js site-er URL (last-e "/" chhara)
 const JWKS = createRemoteJWKSet(
   new URL(`${process.env.CLIENT_URL}/api/auth/jwks`),
 );
@@ -36,6 +37,7 @@ const verifyToken = async (req, res, next) => {
     return res.status(401).send({ message: "Invalid or expired token" });
   }
 };
+
 //                         ***MongoDB connection***
 const client = new MongoClient(
   `mongodb://${process.env.MONGODB_USERNAME}:${process.env.MONGODB_PASSWORD}@ac-2soslzi-shard-00-00.w0rm344.mongodb.net:27017,ac-2soslzi-shard-00-01.w0rm344.mongodb.net:27017,ac-2soslzi-shard-00-02.w0rm344.mongodb.net:27017/?ssl=true&replicaSet=atlas-13wds7-shard-0&authSource=admin`,
@@ -53,14 +55,14 @@ export async function connectToMongoDB() {
 const mongoClient = await connectToMongoDB();
 const db = mongoClient.db("BooksForBooknook");
 const booksCollection = db.collection("latestBooks");
-const borrowsCollection = db.collection("borrows"); // new collection
+const borrowsCollection = db.collection("borrows");
 const myAddedBookCollection = db.collection("myAddedBook");
-
 
 app.get("/", (req, res) => {
   res.send("Book nook server is running");
 });
 
+//                         ***Books routes***
 app.get("/latestBooks", async (req, res) => {
   try {
     const books = await booksCollection
@@ -75,7 +77,7 @@ app.get("/latestBooks", async (req, res) => {
   }
 });
 
-app.get("/allbooks",  async (req, res) => {
+app.get("/allbooks", async (req, res) => {
   try {
     const books = await booksCollection.find().toArray();
     res.send(books);
@@ -85,7 +87,7 @@ app.get("/allbooks",  async (req, res) => {
   }
 });
 
-app.post("/allbooks",  async (req, res) => {
+app.post("/allbooks", async (req, res) => {
   try {
     const newBook = req.body;
     const result = await booksCollection.insertOne(newBook);
@@ -101,9 +103,8 @@ app.post("/allbooks",  async (req, res) => {
   }
 });
 
-app.get("/allbooks/:id"
-,async (req, res) => {
-
+// Book details (private)
+app.get("/allbooks/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -193,13 +194,13 @@ app.post("/borrows", async (req, res) => {
   }
 });
 
-// Get a user's borrowed books (useful for a "My Borrows" page)
+// Get a user's borrowed books
 // Example: GET /borrows?email=user@example.com
-app.get('/borrows', async (req, res) => {
+app.get("/borrows", async (req, res) => {
   try {
     const { email } = req.query;
     if (!email) {
-      return res.status(400).send({ message: 'email query is required' });
+      return res.status(400).send({ message: "email query is required" });
     }
 
     const borrowsBook = await borrowsCollection
@@ -213,7 +214,8 @@ app.get('/borrows', async (req, res) => {
     res.status(500).send({ message: "Failed to fetch borrows" });
   }
 });
-// Return a book = remove the borrow record (only the owner can do this)
+
+// Return a book = remove the borrow record
 // DELETE /borrows/:id?email=user@example.com
 app.delete("/borrows/:id", async (req, res) => {
   try {
@@ -243,11 +245,14 @@ app.delete("/borrows/:id", async (req, res) => {
     res.status(500).send({ success: false, message: "Failed to return book" });
   }
 });
+
+//                         ***My Added Books routes (all JWT protected)***
+
 // Add a book
-app.post("/my-books", async (req, res) => {
+app.post("/my-books", verifyToken, async (req, res) => {
   try {
     const { title, author, category, image, description, userName } = req.body;
-    const userEmail = req.user.email; // from the token
+    const userEmail = req.user.email; // from the verified token
 
     if (!title || !author || !category || !image) {
       return res
@@ -292,7 +297,7 @@ app.get("/my-books", verifyToken, async (req, res) => {
 });
 
 // Update (owner only)
-app.put("/my-books/:id",  async (req, res) => {
+app.put("/my-books/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
     const { title, author, category, image, description } = req.body;
@@ -316,7 +321,9 @@ app.put("/my-books/:id",  async (req, res) => {
     );
 
     if (result.matchedCount === 0) {
-      return res.status(404).send({ success: false, message: "Book not found" });
+      return res
+        .status(404)
+        .send({ success: false, message: "Book not found" });
     }
     res.send({ success: true, message: "Book updated successfully" });
   } catch (error) {
@@ -326,7 +333,7 @@ app.put("/my-books/:id",  async (req, res) => {
 });
 
 // Delete (owner only)
-app.delete("/my-books/:id", async (req, res) => {
+app.delete("/my-books/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -340,38 +347,10 @@ app.delete("/my-books/:id", async (req, res) => {
     });
 
     if (result.deletedCount === 0) {
-      return res.status(404).send({ success: false, message: "Book not found" });
-    }
-    res.send({ success: true, message: "Book deleted successfully" });
-  } catch (error) {
-    console.error(error);
-    res.status(500).send({ success: false, message: "Failed to delete book" });
-  }
-});
-
-// Delete a book (only the owner can delete): DELETE /my-books/:id?email=...
-app.delete("/my-books/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { email } = req.query;
-
-    if (!ObjectId.isValid(id) || !email) {
-      return res
-        .status(400)
-        .send({ success: false, message: "Valid id and email are required" });
-    }
-
-    const result = await myAddedBookCollection.deleteOne({
-      _id: new ObjectId(id),
-      userEmail: email,
-    });
-
-    if (result.deletedCount === 0) {
       return res
         .status(404)
         .send({ success: false, message: "Book not found" });
     }
-
     res.send({ success: true, message: "Book deleted successfully" });
   } catch (error) {
     console.error(error);
@@ -379,10 +358,11 @@ app.delete("/my-books/:id", async (req, res) => {
   }
 });
 
+// Vercel-e app.listen lagbe na, local-e lagbe
+if (process.env.VERCEL !== "1") {
+  app.listen(port, () => {
+    console.log(`Book nook server is running on port: ${port}`);
+  });
+}
 
-app.listen(port, () => {
-  console.log(`Book nook server is running on port: ${port}`);
-});
-
-//http://localhost:5000
-export default app
+export default app;
