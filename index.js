@@ -28,7 +28,21 @@ const mongoClient = await connectToMongoDB();
 const db = mongoClient.db("BooksForBooknook");
 const booksCollection = db.collection("latestBooks");
 const borrowsCollection = db.collection("borrows");
-const myAddedBookCollection = db.collection("myAddedBook");
+
+// Purano book-gulo-te copies field nei. Server chalu hole ekbar auto set hoye jay
+// (je book-e age theke field ache segulo touch hoy na). Eta pore muche dite paro.
+const DEFAULT_COPIES = 5;
+try {
+  const migrated = await booksCollection.updateMany(
+    { availableCopies: { $exists: false } },
+    { $set: { totalCopies: DEFAULT_COPIES, availableCopies: DEFAULT_COPIES } },
+  );
+  if (migrated.modifiedCount > 0) {
+    console.log(`Set default copies on ${migrated.modifiedCount} old books`);
+  }
+} catch (err) {
+  console.error("Copies migration failed:", err.message);
+}
 
 app.get("/", (req, res) => {
   res.send("Book nook server is running");
@@ -56,22 +70,6 @@ app.get("/allbooks", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).send({ message: "Failed to fetch books" });
-  }
-});
-
-app.post("/allbooks", async (req, res) => {
-  try {
-    const newBook = req.body;
-    const result = await booksCollection.insertOne(newBook);
-
-    res.send({
-      success: true,
-      message: "Book added successfully",
-      insertedId: result.insertedId,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).send({ success: false, message: "Failed to add book" });
   }
 });
 
@@ -137,7 +135,21 @@ app.post("/borrows", async (req, res) => {
       });
     }
 
-    // 4. Build the record (dates are set on the server, 14-day loan)
+    // 4. Copy kombano ($inc -1). Shudhu jodi availableCopies > 0 hoy,
+    //    tai duijon ek shathe shesh copy nilew count 0-r niche jabe na.
+    const decrement = await booksCollection.updateOne(
+      { _id: new ObjectId(bookId), availableCopies: { $gt: 0 } },
+      { $inc: { availableCopies: -1 } },
+    );
+
+    if (decrement.modifiedCount === 0) {
+      return res.status(409).send({
+        success: false,
+        message: "Not available. All copies are borrowed.",
+      });
+    }
+
+    // 5. Build the record (dates are set on the server, 14-day loan)
     const borrowDate = new Date();
     const returnDate = new Date();
     returnDate.setDate(borrowDate.getDate() + 14);
@@ -153,7 +165,17 @@ app.post("/borrows", async (req, res) => {
       status: "borrowed",
     };
 
-    const result = await borrowsCollection.insertOne(borrow);
+    let result;
+    try {
+      result = await borrowsCollection.insertOne(borrow);
+    } catch (insertError) {
+      // Record save na hole copy ferot dao
+      await booksCollection.updateOne(
+        { _id: new ObjectId(bookId) },
+        { $inc: { availableCopies: 1 } },
+      );
+      throw insertError;
+    }
 
     res.status(201).send({
       success: true,
@@ -187,7 +209,7 @@ app.get("/borrows", async (req, res) => {
   }
 });
 
-// Return a book = remove the borrow record
+// Return a book = remove the borrow record + copy ferot ($inc +1)
 // DELETE /borrows/:id?email=user@example.com
 app.delete("/borrows/:id", async (req, res) => {
   try {
@@ -200,15 +222,25 @@ app.delete("/borrows/:id", async (req, res) => {
         .send({ success: false, message: "Valid id and email are required" });
     }
 
-    const result = await borrowsCollection.deleteOne({
+    const borrow = await borrowsCollection.findOne({
       _id: new ObjectId(id),
       userEmail: email,
     });
 
-    if (result.deletedCount === 0) {
+    if (!borrow) {
       return res
         .status(404)
         .send({ success: false, message: "Borrow record not found" });
+    }
+
+    await borrowsCollection.deleteOne({ _id: borrow._id });
+
+    // Copy ferot ($inc +1)
+    if (ObjectId.isValid(borrow.bookId)) {
+      await booksCollection.updateOne(
+        { _id: new ObjectId(borrow.bookId) },
+        { $inc: { availableCopies: 1 } },
+      );
     }
 
     res.send({ success: true, message: "Book returned successfully" });
@@ -219,13 +251,22 @@ app.delete("/borrows/:id", async (req, res) => {
 });
 
 //                         ***My Added Books routes***
-// User-er email request theke ashe (body ba ?email=), token theke na.
+// Book-gulo shob book-er shathe `latestBooks` collection-e-i thake.
+// Je user add koreche tar naam ar email book-er sathe save hoy.
 
 // Add a book
 app.post("/my-books", async (req, res) => {
   try {
-    const { title, author, category, image, description, userName, userEmail } =
-      req.body;
+    const {
+      title,
+      author,
+      category,
+      image,
+      description,
+      userName,
+      userEmail,
+      totalCopies,
+    } = req.body;
 
     if (!title || !author || !category || !image || !userEmail) {
       return res
@@ -233,7 +274,15 @@ app.post("/my-books", async (req, res) => {
         .send({ success: false, message: "Missing required fields" });
     }
 
-    const result = await myAddedBookCollection.insertOne({
+    const copies = Number(totalCopies);
+    if (!Number.isInteger(copies) || copies < 1) {
+      return res.status(400).send({
+        success: false,
+        message: "Total copies must be a whole number (1 or more)",
+      });
+    }
+
+    const result = await booksCollection.insertOne({
       title,
       author,
       category,
@@ -241,6 +290,8 @@ app.post("/my-books", async (req, res) => {
       description: description || "",
       userName,
       userEmail,
+      totalCopies: copies,
+      availableCopies: copies, // shuru-te shob copy available
       addedAt: new Date(),
     });
 
@@ -255,7 +306,7 @@ app.post("/my-books", async (req, res) => {
   }
 });
 
-// Get only the logged-in user's books
+// Shudhu logged-in user-er add kora book
 // GET /my-books?email=user@example.com
 app.get("/my-books", async (req, res) => {
   try {
@@ -264,7 +315,7 @@ app.get("/my-books", async (req, res) => {
       return res.status(400).send({ message: "email query is required" });
     }
 
-    const books = await myAddedBookCollection
+    const books = await booksCollection
       .find({ userEmail: email })
       .sort({ addedAt: -1 })
       .toArray();
@@ -275,7 +326,7 @@ app.get("/my-books", async (req, res) => {
   }
 });
 
-// Update (owner only)
+// Update (shudhu je add koreche)
 // PUT /my-books/:id?email=user@example.com
 app.put("/my-books/:id", async (req, res) => {
   try {
@@ -289,7 +340,7 @@ app.put("/my-books/:id", async (req, res) => {
         .send({ success: false, message: "Valid id and email are required" });
     }
 
-    const result = await myAddedBookCollection.updateOne(
+    const result = await booksCollection.updateOne(
       { _id: new ObjectId(id), userEmail: email },
       {
         $set: {
@@ -315,7 +366,7 @@ app.put("/my-books/:id", async (req, res) => {
   }
 });
 
-// Delete (owner only)
+// Delete (shudhu je add koreche)
 // DELETE /my-books/:id?email=user@example.com
 app.delete("/my-books/:id", async (req, res) => {
   try {
@@ -328,7 +379,7 @@ app.delete("/my-books/:id", async (req, res) => {
         .send({ success: false, message: "Valid id and email are required" });
     }
 
-    const result = await myAddedBookCollection.deleteOne({
+    const result = await booksCollection.deleteOne({
       _id: new ObjectId(id),
       userEmail: email,
     });
