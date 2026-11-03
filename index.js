@@ -101,8 +101,7 @@ app.post("/allbooks",  async (req, res) => {
   }
 });
 
-app.get("/allbooks/:id",
-verifyToken
+app.get("/allbooks/:id"
 ,async (req, res) => {
 
   try {
@@ -245,7 +244,7 @@ app.delete("/borrows/:id", async (req, res) => {
   }
 });
 // Add a book
-app.post("/my-books", verifyToken, async (req, res) => {
+app.post("/my-books", async (req, res) => {
   try {
     const { title, author, category, image, description, userName } = req.body;
     const userEmail = req.user.email; // from the token
@@ -293,7 +292,7 @@ app.get("/my-books", verifyToken, async (req, res) => {
 });
 
 // Update (owner only)
-app.put("/my-books/:id", verifyToken, async (req, res) => {
+app.put("/my-books/:id",  async (req, res) => {
   try {
     const { id } = req.params;
     const { title, author, category, image, description } = req.body;
@@ -327,7 +326,7 @@ app.put("/my-books/:id", verifyToken, async (req, res) => {
 });
 
 // Delete (owner only)
-app.delete("/my-books/:id", verifyToken, async (req, res) => {
+app.delete("/my-books/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
