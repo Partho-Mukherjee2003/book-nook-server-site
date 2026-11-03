@@ -2,7 +2,6 @@ import express from "express";
 import { MongoClient, ObjectId } from "mongodb";
 import "dotenv/config";
 import cors from "cors";
-import { createRemoteJWKSet, jwtVerify } from "jose";
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -10,33 +9,6 @@ const port = process.env.PORT || 5000;
 // middleware
 app.use(cors());
 app.use(express.json());
-
-//                         ***JWT verify middleware***
-// CLIENT_URL = deploy kora Next.js site-er URL (last-e "/" chhara)
-const JWKS = createRemoteJWKSet(
-  new URL(`${process.env.CLIENT_URL}/api/auth/jwks`),
-);
-
-const verifyToken = async (req, res, next) => {
-  const authHeader = req.headers.authorization || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-
-  if (!token) {
-    return res.status(401).send({ message: "Unauthorized access" });
-  }
-
-  try {
-    const { payload } = await jwtVerify(token, JWKS, {
-      issuer: process.env.CLIENT_URL,
-      audience: process.env.CLIENT_URL,
-    });
-    req.user = payload; // payload.email is verified
-    next();
-  } catch (err) {
-    console.error("JWT verify failed:", err.message);
-    return res.status(401).send({ message: "Invalid or expired token" });
-  }
-};
 
 //                         ***MongoDB connection***
 const client = new MongoClient(
@@ -103,8 +75,8 @@ app.post("/allbooks", async (req, res) => {
   }
 });
 
-// Book details (private)
-app.get("/allbooks/:id", verifyToken, async (req, res) => {
+// Book details
+app.get("/allbooks/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -246,15 +218,16 @@ app.delete("/borrows/:id", async (req, res) => {
   }
 });
 
-//                         ***My Added Books routes (all JWT protected)***
+//                         ***My Added Books routes***
+// User-er email request theke ashe (body ba ?email=), token theke na.
 
 // Add a book
-app.post("/my-books", verifyToken, async (req, res) => {
+app.post("/my-books", async (req, res) => {
   try {
-    const { title, author, category, image, description, userName } = req.body;
-    const userEmail = req.user.email; // from the verified token
+    const { title, author, category, image, description, userName, userEmail } =
+      req.body;
 
-    if (!title || !author || !category || !image) {
+    if (!title || !author || !category || !image || !userEmail) {
       return res
         .status(400)
         .send({ success: false, message: "Missing required fields" });
@@ -283,10 +256,16 @@ app.post("/my-books", verifyToken, async (req, res) => {
 });
 
 // Get only the logged-in user's books
-app.get("/my-books", verifyToken, async (req, res) => {
+// GET /my-books?email=user@example.com
+app.get("/my-books", async (req, res) => {
   try {
+    const { email } = req.query;
+    if (!email) {
+      return res.status(400).send({ message: "email query is required" });
+    }
+
     const books = await myAddedBookCollection
-      .find({ userEmail: req.user.email })
+      .find({ userEmail: email })
       .sort({ addedAt: -1 })
       .toArray();
     res.send(books);
@@ -297,17 +276,21 @@ app.get("/my-books", verifyToken, async (req, res) => {
 });
 
 // Update (owner only)
-app.put("/my-books/:id", verifyToken, async (req, res) => {
+// PUT /my-books/:id?email=user@example.com
+app.put("/my-books/:id", async (req, res) => {
   try {
     const { id } = req.params;
+    const { email } = req.query;
     const { title, author, category, image, description } = req.body;
 
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).send({ success: false, message: "Invalid id" });
+    if (!ObjectId.isValid(id) || !email) {
+      return res
+        .status(400)
+        .send({ success: false, message: "Valid id and email are required" });
     }
 
     const result = await myAddedBookCollection.updateOne(
-      { _id: new ObjectId(id), userEmail: req.user.email },
+      { _id: new ObjectId(id), userEmail: email },
       {
         $set: {
           title,
@@ -333,17 +316,21 @@ app.put("/my-books/:id", verifyToken, async (req, res) => {
 });
 
 // Delete (owner only)
-app.delete("/my-books/:id", verifyToken, async (req, res) => {
+// DELETE /my-books/:id?email=user@example.com
+app.delete("/my-books/:id", async (req, res) => {
   try {
     const { id } = req.params;
+    const { email } = req.query;
 
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).send({ success: false, message: "Invalid id" });
+    if (!ObjectId.isValid(id) || !email) {
+      return res
+        .status(400)
+        .send({ success: false, message: "Valid id and email are required" });
     }
 
     const result = await myAddedBookCollection.deleteOne({
       _id: new ObjectId(id),
-      userEmail: req.user.email,
+      userEmail: email,
     });
 
     if (result.deletedCount === 0) {
