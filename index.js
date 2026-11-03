@@ -12,7 +12,9 @@ const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 //middleware function
-const JWKS = createRemoteJWKSet(new URL("http://localhost:3000/api/auth/jwks"));
+const JWKS = createRemoteJWKSet(
+  new URL(`${process.env.CLIENT_URL}/api/auth/jwks`),
+);
 
 const verifyToken = async (req, res, next) => {
   const authHeader = req.headers.authorization || "";
@@ -24,8 +26,8 @@ const verifyToken = async (req, res, next) => {
 
   try {
     const { payload } = await jwtVerify(token, JWKS, {
-      issuer: "http://localhost:3000",
-      audience: "http://localhost:3000",
+      issuer: process.env.CLIENT_URL,
+      audience: process.env.CLIENT_URL,
     });
     req.user = payload; // payload.email is verified
     next();
@@ -384,3 +386,4 @@ app.listen(port, () => {
 });
 
 //http://localhost:5000
+export default app
