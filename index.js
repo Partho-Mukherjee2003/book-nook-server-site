@@ -2,6 +2,7 @@ import express from "express";
 import { MongoClient, ObjectId } from "mongodb";
 import "dotenv/config";
 import cors from "cors";
+import { jwtVerify, createRemoteJWKSet } from "jose";
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -9,6 +10,44 @@ const port = process.env.PORT || 5000;
 // middleware
 app.use(cors());
 app.use(express.json());
+
+//******************* middleware function **************************
+const verifyToken = async (req,res,next)=>{
+  const authHeader = req.headers.authorization;
+   console.log(authHeader);
+  //console.log(req.method, req.originalUrl, req.headers.authorization);
+  if (!authHeader) {
+    return res.status(401).send({
+      msg: "Unauthorized!!",
+    });
+  }
+  const token = authHeader.split(" ")[1];
+  console.log(token);
+  if (!token) {
+    return res.status(401).send({
+      msg: "Unauthorized!!",
+    });
+  }
+  //***************** verify token ************************/
+  //http://localhost:3000/api/auth/jwks
+
+  const JWKS = createRemoteJWKSet(
+    new URL("http://localhost:3000/api/auth/jwks"),
+  );
+  try{
+    const { payload } = await jwtVerify(token,JWKS);
+    next()
+  }catch(error){
+    console.log('error from backend token verify',error)
+  }
+
+}
+
+
+
+
+
+
 
 //                         ***MongoDB connection***
 const client = new MongoClient(
@@ -74,7 +113,10 @@ app.get("/allbooks", async (req, res) => {
 });
 
 // Book details
-app.get("/allbooks/:id", async (req, res) => {
+app.get("/allbooks/:id",
+  verifyToken,
+  async (req, res) => {
+
   try {
     const { id } = req.params;
 
@@ -255,7 +297,7 @@ app.delete("/borrows/:id", async (req, res) => {
 // Je user add koreche tar naam ar email book-er sathe save hoy.
 
 // Add a book
-app.post("/my-books", async (req, res) => {
+app.post("/my-books",verifyToken, async (req, res) => {
   try {
     const {
       title,
@@ -328,7 +370,7 @@ app.get("/my-books", async (req, res) => {
 
 // Update (shudhu je add koreche)
 // PUT /my-books/:id?email=user@example.com
-app.put("/my-books/:id", async (req, res) => {
+app.put("/my-books/:id", verifyToken ,async (req, res) => {
   try {
     const { id } = req.params;
     const { email } = req.query;
@@ -368,7 +410,7 @@ app.put("/my-books/:id", async (req, res) => {
 
 // Delete (shudhu je add koreche)
 // DELETE /my-books/:id?email=user@example.com
-app.delete("/my-books/:id", async (req, res) => {
+app.delete("/my-books/:id",verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
     const { email } = req.query;
